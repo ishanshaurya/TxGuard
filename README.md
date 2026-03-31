@@ -1,171 +1,279 @@
-# Payment Bouncer — Phase 1: Skeleton
+# TxGuard — Transactional Safety Gateway
 
-> **Goal**: Prove the wire works. 100 `POST /api/v1/charge` requests in, 100 `200 OK` out. Nothing crashes.
+A production-grade, idempotent payment gateway built with Spring Boot 3, designed to prevent double charges, ensure exactly-once processing, and provide full observability into every transaction.
 
 ---
 
-## What's in this phase
+## The Problem It Solves
 
-| Thing | Purpose |
+When a payment request is sent over a network, retries are inevitable — a timeout, a dropped connection, or a client bug can cause the same charge to be submitted multiple times. Without protection, this means double charges.
+
+**TxGuard guarantees that no matter how many times the same request is retried, the customer is charged exactly once.**
+
+---
+
+## Architecture
+
+```
+Client Application
+        │
+        │  POST /api/v1/charge
+        │  X-API-Key: <key>
+        ▼
+┌─────────────────────────────────────────────────────┐
+│                    TxGuard                          │
+│                                                     │
+│  SecurityFilter ──► Rate Limit (30 req/10s)         │
+│       │             Auth (X-API-Key)                │
+│       ▼                                             │
+│  IdempotencyService ──► Redis                       │
+│       │                 (24h key cache)             │
+│       ▼                                             │
+│  ChargeService ──► PostgreSQL                       │
+│       │            (PENDING → PROCESSING            │
+│       │             → SETTLED | FAILED)             │
+│       ▼                                             │
+│  RabbitMQ Publisher ──► Queue                       │
+│                          │                         │
+│                     Consumer ──► Settle/Fail        │
+│                          │       (3 retries)        │
+│                        DLQ ──► Manual review        │
+└─────────────────────────────────────────────────────┘
+        │
+        ▼
+   Dashboard: http://localhost:8080
+```
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
 |---|---|
-| `docker-compose.yml` | PostgreSQL 16, Redis 7, RabbitMQ 3.13, Spring Boot app |
-| `pom.xml` | All Spring Boot 3.3 dependencies locked in |
-| `ChargeRequest.java` | Wire contract with full Bean Validation |
-| `ChargeController.java` | `POST /api/v1/charge` shell — hardcoded `200 OK` |
-| `ChargeResponse.java` | Stub response envelope |
-| `GlobalExceptionHandler.java` | Clean `400`/`500` JSON envelopes from day one |
-| `InfrastructureConfig.java` | Redis template + RabbitMQ topology declared |
-| `stress-test.sh` | Fires 100 requests, fails if any aren't `200` |
+| Runtime | Java 21, Spring Boot 3.3 |
+| API | Spring MVC, Bean Validation |
+| Idempotency | Redis 7 (SET NX, 24h TTL) |
+| Persistence | PostgreSQL 16, Flyway, Spring Data JPA |
+| Messaging | RabbitMQ 3.13, Spring AMQP |
+| Observability | Micrometer, Prometheus, Spring Actuator |
+| Security | API Key auth, sliding window rate limiter |
+| Infrastructure | Docker, Docker Compose |
 
 ---
 
-## Prerequisites
+## Key Features
 
-- Docker Desktop ≥ 24 with Compose v2
-- Java 21 (only needed if running outside Docker)
-- `curl` (for the stress test)
+**Idempotency Gate**
+Every request carries a unique `idempotency_key`. Redis atomically claims each key using `SET NX`. Duplicate requests with the same key return the original response instantly. Duplicate requests with a different body are rejected with `409 Conflict`.
+
+**Async Processing Pipeline**
+The HTTP layer returns immediately after persisting a `PENDING` charge and publishing to RabbitMQ. A consumer handles settlement asynchronously. Failed messages are retried 3 times with exponential backoff before routing to a dead-letter queue.
+
+**Full Audit Trail**
+Every status transition (`PENDING → PROCESSING → SETTLED | FAILED`) is recorded in `charge_status_history` — an append-only PostgreSQL table. Nothing is ever updated without a history row.
+
+**Rate Limiting**
+30 requests per 10-second sliding window per API key. Exceeding the limit returns `429 Too Many Requests`.
+
+**Live Dashboard**
+Single-page operations dashboard at `/` showing real-time charge feed, queue depth graph, component health, security counters, and an interactive charge submission panel.
 
 ---
 
-## Quick start — full Docker stack
+## Quick Start
+
+### Prerequisites
+- Docker Desktop 24+
+- No other dependencies needed — Maven and Java run inside the container
+
+### Run
 
 ```bash
-# 1. Build and bring everything up
+git clone https://github.com/YOUR_USERNAME/txguard.git
+cd txguard
 docker compose up --build
+```
 
-# 2. Wait for the health check log line:
-#    bouncer-app  | Started PaymentBouncerApplication in X.XXXs
+Wait for:
+```
+txguard-app | Started TxGuardApplication in X.XXXs
+```
 
-# 3. Smoke test — single request
+Open **http://localhost:8080** for the dashboard.
+
+### Fire a charge
+
+```bash
 curl -s -X POST http://localhost:8080/api/v1/charge \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: bouncer-dev-key-12345" \
   -d '{
-    "idempotency_key":      "smoke-001",
+    "idempotency_key":      "order-001",
     "amount":               5000,
     "currency":             "INR",
-    "merchant_reference":   "order-smoke-001",
+    "merchant_reference":   "swiggy-order-9821",
     "payment_method_token": "tok_visa_4242"
-  }' | jq .
-
-# Expected response:
-# {
-#   "idempotency_key": "smoke-001",
-#   "charge_id": "STUB-0000",
-#   "status": "ACCEPTED",
-#   "message": "Phase 1 skeleton — real processing coming in Phase 2",
-#   "processed_at": "2024-..."
-# }
+  }' | python3 -m json.tool
 ```
 
----
-
-## Quick start — local JVM (infrastructure in Docker only)
+### Prove idempotency works
 
 ```bash
-# Start only the backing services
-docker compose up postgres redis rabbitmq
+# Send the same request twice — both return the same charge_id
+KEY="test-$(date +%s)"
 
-# Build and run the app locally
-./mvnw spring-boot:run
-```
-
-Spring reads env vars with safe local defaults — no `.env` file needed.
-
----
-
-## Stress test
-
-```bash
-chmod +x stress-test.sh
-./stress-test.sh
-```
-
-Output on success:
-```
-═══════════════════════════════════════════════
-  Payment Bouncer — Phase 1 Stress Test
-  Target : http://localhost:8080/api/v1/charge
-  Shots  : 100
-═══════════════════════════════════════════════
-
-  Progress: 100/100  ✓ 100  ✗ 0
-
-═══════════════════════════════════════════════
-  Results
-  Passed : 100/100
-  Failed : 0/100
-═══════════════════════════════════════════════
-  ✅ ALL 100 REQUESTS PASSED — Phase 1 wire is solid.
-═══════════════════════════════════════════════
-```
-
----
-
-## Validation in action
-
-The controller rejects bad requests before any logic runs:
-
-```bash
-# Missing idempotency_key → 400
 curl -s -X POST http://localhost:8080/api/v1/charge \
+  -H "X-API-Key: bouncer-dev-key-12345" \
   -H "Content-Type: application/json" \
-  -d '{"amount": 100, "currency": "INR", "merchant_reference": "x", "payment_method_token": "t"}' \
-  | jq .
+  -d "{\"idempotency_key\":\"$KEY\",\"amount\":1000,\"currency\":\"INR\",\"merchant_reference\":\"test\",\"payment_method_token\":\"tok\"}"
 
-# {
-#   "status": 400,
-#   "error": "Validation failed",
-#   "fields": [{ "field": "idempotencyKey", "message": "idempotency_key is required" }],
-#   "timestamp": "..."
-# }
+# Replay — same charge_id, no double charge
+curl -s -X POST http://localhost:8080/api/v1/charge \
+  -H "X-API-Key: bouncer-dev-key-12345" \
+  -H "Content-Type: application/json" \
+  -d "{\"idempotency_key\":\"$KEY\",\"amount\":1000,\"currency\":\"INR\",\"merchant_reference\":\"test\",\"payment_method_token\":\"tok\"}"
 ```
 
 ---
 
-## Useful URLs
+## API Reference
 
-| Service | URL | Credentials |
+### POST /api/v1/charge
+
+**Headers**
+
+| Header | Required | Description |
 |---|---|---|
-| Spring Boot app | http://localhost:8080 | — |
-| Health probe | http://localhost:8080/actuator/health | — |
-| RabbitMQ Management UI | http://localhost:15672 | `bouncer` / `rabbit_secret` |
+| `X-API-Key` | Yes | API key for authentication |
+| `Content-Type` | Yes | `application/json` |
 
----
+**Request Body**
 
-## Package structure
-
-```
-com.bouncer
-├── PaymentBouncerApplication.java     ← entry point
-└── internal/                          ← nothing outside imports these
-    ├── controller/
-    │   └── ChargeController.java
-    ├── model/
-    │   ├── ChargeRequest.java         ← carried forward into every phase
-    │   └── ChargeResponse.java
-    └── config/
-        ├── GlobalExceptionHandler.java
-        └── InfrastructureConfig.java  ← Redis + RabbitMQ beans
+```json
+{
+  "idempotency_key":      "string (max 64 chars, unique per charge attempt)",
+  "amount":               1000,
+  "currency":             "INR",
+  "merchant_reference":   "string (your internal order ID)",
+  "payment_method_token": "string (payment instrument token)"
+}
 ```
 
-> **`internal/` enforcement**: naming convention in Phase 1. Phase 2 adds an ArchUnit test that will fail the build if anything outside `com.bouncer` imports from `com.bouncer.internal`.
+**Response**
 
----
+```json
+{
+  "idempotency_key": "order-001",
+  "charge_id":       "550e8400-e29b-41d4-a716-446655440000",
+  "status":          "PENDING",
+  "message":         "Charge accepted — processing asynchronously",
+  "processed_at":    "2024-01-01T00:00:00Z"
+}
+```
 
-## Troubleshooting
+**Status codes**
 
-| Symptom | Fix |
+| Code | Meaning |
 |---|---|
-| `Connection refused` on port 5432/6379/5672 | Run `docker compose ps` — check all services are `healthy` |
-| App crashes with `Unable to connect to Redis` | Redis healthcheck must pass before app starts. Check `docker compose logs redis` |
-| Port conflict on 5432/6379/5672/8080 | Stop the conflicting service or change host port in `docker-compose.yml` |
-| `rabbitmq-diagnostics: command not found` | Use `rabbitmq:3.13-management-alpine` (the `management` variant) — already specified |
+| `200` | Charge accepted or idempotent replay |
+| `400` | Validation failure — check `fields` array |
+| `401` | Missing or invalid API key |
+| `409` | Idempotency conflict — body mismatch or key in-flight |
+| `429` | Rate limit exceeded |
+| `500` | Internal error |
 
 ---
 
-## Carried into Phase 2
+## Observability Endpoints
 
-- `docker-compose.yml` (add migration service — Flyway)
-- `ChargeRequest.java` (unchanged wire contract)
-- `POST /api/v1/charge` endpoint URL (idempotency logic plugged in here)
-- `InfrastructureConfig.java` (Redis template used for idempotency key storage)
+| Endpoint | Description |
+|---|---|
+| `GET /actuator/health` | Full component health with detail |
+| `GET /actuator/metrics` | All Micrometer metrics |
+| `GET /actuator/prometheus` | Prometheus scrape endpoint |
+| `GET /dashboard/stats` | Live dashboard stats (JSON) |
+| `GET /dashboard/charges/recent` | Last 10 charges |
+
+---
+
+## Project Structure
+
+```
+src/main/java/com/bouncer/
+├── internal/
+│   ├── config/          # Spring configuration, exception handlers
+│   ├── controller/      # HTTP boundary (ChargeController, DashboardDataController)
+│   ├── entity/          # JPA entities (Charge, ChargeStatusHistory)
+│   ├── exception/       # Domain exceptions
+│   ├── messaging/       # RabbitMQ publisher + consumer
+│   ├── model/           # Request/response DTOs, enums
+│   ├── observability/   # Health indicators, Micrometer metrics
+│   ├── repository/      # Spring Data repositories
+│   ├── security/        # API key filter, rate limiter, security metrics
+│   └── service/         # Business logic (ChargeService, IdempotencyService)
+└── PaymentBouncerApplication.java
+
+src/main/resources/
+├── db/migration/        # Flyway SQL migrations
+├── static/              # Dashboard HTML
+└── application.yml      # Configuration
+```
+
+---
+
+## Development
+
+### Stress tests
+
+```bash
+chmod +x stress-test*.sh
+
+./stress-test.sh             # Phase 1 — 100 basic requests
+./stress-test-phase2.sh      # Phase 2 — idempotency scenarios
+./stress-test-phase3.sh      # Phase 3 — persistence + UUIDs
+./stress-test-phase4.sh      # Phase 4 — async settlement
+./stress-test-phase5.sh      # Phase 5 — observability
+./stress-test-phase6.sh      # Phase 6 — auth + rate limiting
+```
+
+### Inspect the database
+
+```bash
+docker exec -it bouncer-postgres psql -U bouncer -d bouncer \
+  -c "SELECT id, status, amount, currency, created_at FROM charges ORDER BY created_at DESC LIMIT 10;"
+```
+
+### Inspect RabbitMQ
+
+Management UI: **http://localhost:15672**
+Credentials: `bouncer` / `rabbit_secret`
+
+---
+
+## Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `BOUNCER_API_KEY` | `bouncer-dev-key-12345` | API key for authentication |
+| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/bouncer` | PostgreSQL URL |
+| `SPRING_DATA_REDIS_HOST` | `localhost` | Redis host |
+| `SPRING_RABBITMQ_HOST` | `localhost` | RabbitMQ host |
+
+---
+
+## Built In Phases
+
+| Phase | Feature |
+|---|---|
+| 1 | Spring Boot scaffold, Docker Compose stack, HTTP endpoint |
+| 2 | Redis idempotency gate — exactly-once guarantee |
+| 3 | PostgreSQL persistence, state machine, audit log |
+| 4 | RabbitMQ async pipeline, DLQ, 3x retry with backoff |
+| 5 | Micrometer metrics, health indicators, Prometheus endpoint |
+| 6 | API key auth, rate limiting, live operations dashboard |
+
+---
+
+## License
+
+MIT

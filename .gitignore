@@ -1,28 +1,9 @@
-# Maven
 target/
 *.jar
-*.war
 *.class
-
-# IDE
 .idea/
 *.iml
 .vscode/
-*.swp
-
-# OS
 .DS_Store
-Thumbs.db
-
-# Logs
 *.log
-logs/
-
-# Docker volumes (local data, never commit)
-postgres-data/
-rabbitmq-data/
-
-# Environment secrets — NEVER commit real keys
 .env
-.env.local
-*.env

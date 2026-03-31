@@ -18,7 +18,7 @@
   <artifactId>payment-bouncer</artifactId>
   <version>0.1.0-SNAPSHOT</version>
   <name>payment-bouncer</name>
-  <description>Payment idempotency gateway — Phase 1 skeleton</description>
+  <description>TxGuard — Transactional Safety Gateway</description>
   <packaging>jar</packaging>
 
   <!-- ── Java version ── -->
