@@ -89,11 +89,11 @@ management:
         bouncer.charge.settle.time: 0.5, 0.95, 0.99
 
 # ── Bouncer ───────────────────────────────────────────────────────────────────
-bouncer:
+txguard:
   idempotency:
     ttl-hours: 24
   security:
-    api-key: ${BOUNCER_API_KEY:bouncer-dev-key-12345}
+    api-key: ${TXGUARD_API_KEY:bouncer-dev-key-12345}
     rate-limit: 30
     rate-window-seconds: 10
 
@@ -101,7 +101,7 @@ bouncer:
 logging:
   level:
     root: INFO
-    com.bouncer: DEBUG
+    com.txguard: DEBUG
     org.springframework.web: INFO
     org.flywaydb: INFO
     org.springframework.amqp: INFO

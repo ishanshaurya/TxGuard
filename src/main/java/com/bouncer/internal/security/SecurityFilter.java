@@ -43,7 +43,7 @@ public class SecurityFilter extends OncePerRequestFilter {
     private final Map<String, long[]> rateLimitStore = new ConcurrentHashMap<>();
 
     public SecurityFilter(
-            @Value("${bouncer.security.api-key}") String validApiKey,
+            @Value("${txguard.security.api-key}") String validApiKey,
             SecurityMetrics metrics
     ) {
         // Store as bytes once at startup — never log or expose the raw key
