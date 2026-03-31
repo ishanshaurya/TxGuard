@@ -1,0 +1,109 @@
+spring:
+  application:
+    name: payment-bouncer
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/bouncer}
+    username: ${SPRING_DATASOURCE_USERNAME:bouncer}
+    password: ${SPRING_DATASOURCE_PASSWORD:bouncer_secret}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      pool-name: BounceHikariPool
+      register-mbeans: true
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
+
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:redis_secret}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          min-idle: 2
+
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:localhost}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:bouncer}
+    password: ${SPRING_RABBITMQ_PASSWORD:rabbit_secret}
+    virtual-host: ${SPRING_RABBITMQ_VIRTUAL_HOST:bouncer_vhost}
+    listener:
+      simple:
+        acknowledge-mode: manual
+
+  jackson:
+    default-property-inclusion: NON_NULL
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: 8080
+  shutdown: graceful
+  tomcat:
+    accept-count: 200
+    max-connections: 8192
+    threads:
+      max: 100
+      min-spare: 10
+
+# ── Actuator / Observability ──────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+  health:
+    defaults:
+      enabled: true
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        bouncer.charge.settle.time: true
+      percentiles:
+        http.server.requests: 0.5, 0.95, 0.99
+        bouncer.charge.settle.time: 0.5, 0.95, 0.99
+
+# ── Bouncer ───────────────────────────────────────────────────────────────────
+bouncer:
+  idempotency:
+    ttl-hours: 24
+  security:
+    api-key: ${BOUNCER_API_KEY:bouncer-dev-key-12345}
+    rate-limit: 30
+    rate-window-seconds: 10
+
+# ── Logging — structured key=value pairs ──────────────────────────────────────
+logging:
+  level:
+    root: INFO
+    com.bouncer: DEBUG
+    org.springframework.web: INFO
+    org.flywaydb: INFO
+    org.springframework.amqp: INFO
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{20} - %msg%n"

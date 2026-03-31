@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Payment Bouncer — Control Room</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #f7f6f3;
+    --surface:   #ffffff;
+    --border:    #e8e6e1;
+    --border2:   #d4d0c8;
+    --text:      #1a1916;
+    --muted:     #7a776e;
+    --accent:    #1a6b4a;
+    --accent2:   #2d9c6e;
+    --danger:    #c0392b;
+    --warn:      #d97706;
+    --info:      #1d6fb5;
+    --pending:   #7c3aed;
+    --settled:   #1a6b4a;
+    --failed:    #c0392b;
+    --processing:#d97706;
+    --mono:      'DM Mono', monospace;
+    --sans:      'DM Sans', sans-serif;
+    --radius:    8px;
+    --shadow:    0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.05);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    font-size: 14px;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow);
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: -0.3px;
+  }
+
+  .logo-icon {
+    width: 28px; height: 28px;
+    background: var(--accent);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .live-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+
+  .pulse {
+    width: 7px; height: 7px;
+    background: var(--accent2);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.5; transform: scale(0.8); }
+  }
+
+  .last-updated {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+
+  /* ── Layout ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 20px;
+    padding: 20px 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .left-col { display: flex; flex-direction: column; gap: 16px; }
+  .right-col { display: flex; flex-direction: column; gap: 16px; }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .card-header {
+    padding: 14px 18px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .card-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--muted);
+  }
+
+  .card-body { padding: 18px; }
+
+  /* ── Stat grid ── */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    box-shadow: var(--shadow);
+    transition: transform 0.15s;
+  }
+
+  .stat:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+
+  .stat-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: var(--muted);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .stat-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+  }
+
+  .stat-value {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -1px;
+    transition: color 0.3s;
+  }
+
+  .stat-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* ── Security stats ── */
+  .security-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .sec-stat {
+    padding: 14px;
+    background: var(--bg);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+  }
+
+  .sec-stat-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: var(--muted);
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  .sec-stat-value {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 500;
+  }
+
+  /* ── Health grid ── */
+  .health-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .health-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: var(--bg);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+
+  .health-name {
+    font-size: 13px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .health-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    text-transform: uppercase;
+  }
+
+  .badge-up   { background: #dcfce7; color: #16a34a; }
+  .badge-down { background: #fee2e2; color: #dc2626; }
+
+  .health-detail {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+
+  /* ── Queue graph ── */
+  .queue-graph {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 60px;
+    padding: 0 2px;
+  }
+
+  .queue-bar {
+    flex: 1;
+    background: var(--border2);
+    border-radius: 2px 2px 0 0;
+    min-height: 2px;
+    transition: height 0.4s ease, background 0.3s;
+    position: relative;
+  }
+
+  .queue-bar.active { background: var(--accent2); }
+  .queue-bar.high   { background: var(--warn); }
+
+  .queue-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+  }
+
+  .queue-depth-label {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 500;
+  }
+
+  .queue-sub { font-size: 11px; color: var(--muted); }
+
+  /* ── Charge feed ── */
+  .charge-feed {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .charge-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.2s;
+    animation: slideIn 0.3s ease;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .charge-row:hover { background: var(--bg); }
+  .charge-row:last-child { border-bottom: none; }
+
+  .charge-id {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .charge-amount {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .charge-status {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .status-SETTLED    { background: #dcfce7; color: #16a34a; }
+  .status-PENDING    { background: #ede9fe; color: #7c3aed; }
+  .status-PROCESSING { background: #fef3c7; color: #d97706; }
+  .status-FAILED     { background: #fee2e2; color: #dc2626; }
+
+  .charge-time {
+    font-size: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+
+  /* ── Demo panel ── */
+  .demo-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+
+  .form-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--muted);
+  }
+
+  .form-input {
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 9px 12px;
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    transition: border-color 0.15s, box-shadow 0.15s;
+    width: 100%;
+  }
+
+  .form-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(26,107,74,0.1);
+  }
+
+  .btn-fire {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 11px 20px;
+    border-radius: 6px;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+    width: 100%;
+    letter-spacing: 0.2px;
+  }
+
+  .btn-fire:hover   { background: var(--accent2); }
+  .btn-fire:active  { transform: scale(0.98); }
+  .btn-fire:disabled { background: var(--border2); cursor: not-allowed; }
+
+  .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+  .btn-secondary {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border2);
+    padding: 9px 14px;
+    border-radius: 6px;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-secondary:hover { background: var(--border); }
+
+  /* ── Response box ── */
+  .response-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--muted);
+    min-height: 80px;
+    max-height: 160px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    transition: border-color 0.3s;
+  }
+
+  .response-box.success { border-color: var(--accent2); color: var(--accent); }
+  .response-box.error   { border-color: var(--danger);  color: var(--danger); }
+  .response-box.warn    { border-color: var(--warn);    color: var(--warn); }
+
+  .api-key-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .api-key-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+  .api-key-value { color: var(--accent); }
+
+  .divider { height: 1px; background: var(--border); }
+
+  .section-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">PB</div>
+    Payment Bouncer
+    <span style="color:var(--border2);margin:0 4px">|</span>
+    <span style="color:var(--muted);font-weight:400;font-size:12px;letter-spacing:0.2px">Operations Dashboard</span>
+  </div>
+  <div class="header-right">
+    <div class="live-badge">
+      <div class="pulse"></div>
+      LIVE
+    </div>
+    <div class="last-updated" id="lastUpdated">—</div>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- ══ LEFT COLUMN — OPS ══ -->
+  <div class="left-col">
+
+    <!-- Charge counters -->
+    <div class="stat-grid" id="chargeStats">
+      <div class="stat">
+        <div class="stat-label"><div class="stat-dot" style="background:var(--settled)"></div>Settled</div>
+        <div class="stat-value" id="statSettled" style="color:var(--settled)">—</div>
+        <div class="stat-sub">total processed</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label"><div class="stat-dot" style="background:var(--pending)"></div>Pending</div>
+        <div class="stat-value" id="statPending" style="color:var(--pending)">—</div>
+        <div class="stat-sub">awaiting queue</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label"><div class="stat-dot" style="background:var(--processing)"></div>Processing</div>
+        <div class="stat-value" id="statProcessing" style="color:var(--processing)">—</div>
+        <div class="stat-sub">in consumer</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label"><div class="stat-dot" style="background:var(--failed)"></div>Failed</div>
+        <div class="stat-value" id="statFailed" style="color:var(--failed)">—</div>
+        <div class="stat-sub">need review</div>
+      </div>
+    </div>
+
+    <!-- Security metrics -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Security Metrics</span>
+        <span style="font-size:11px;color:var(--muted);font-family:var(--mono)">30 req / 10s window</span>
+      </div>
+      <div class="card-body">
+        <div class="security-grid">
+          <div class="sec-stat">
+            <div class="sec-stat-label">Rate Limited (429)</div>
+            <div class="sec-stat-value" id="stat429" style="color:var(--warn)">—</div>
+          </div>
+          <div class="sec-stat">
+            <div class="sec-stat-label">Auth Failures (401)</div>
+            <div class="sec-stat-value" id="stat401" style="color:var(--danger)">—</div>
+          </div>
+          <div class="sec-stat">
+            <div class="sec-stat-label">Active Requests</div>
+            <div class="sec-stat-value" id="statActive" style="color:var(--info)">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Queue depth + graph -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Queue Depth</span>
+        <span style="font-size:11px;color:var(--muted)">last 30 readings</span>
+      </div>
+      <div class="card-body">
+        <div class="queue-graph" id="queueGraph">
+          <!-- bars injected by JS -->
+        </div>
+        <div class="queue-info">
+          <div>
+            <div class="queue-depth-label" id="queueDepthMain">—</div>
+            <div class="queue-sub">main queue messages</div>
+          </div>
+          <div style="text-align:right">
+            <div class="queue-depth-label" id="queueDepthDlq" style="color:var(--danger)">—</div>
+            <div class="queue-sub">DLQ messages</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Component health -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Component Health</span>
+      </div>
+      <div class="card-body" style="padding:12px">
+        <div class="health-grid" id="healthGrid">
+          <!-- rows injected by JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Live charge feed -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Live Charge Feed</span>
+        <span style="font-size:11px;color:var(--muted)">latest 10</span>
+      </div>
+      <div class="charge-feed" id="chargeFeed">
+        <!-- rows injected by JS -->
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══ RIGHT COLUMN — DEMO ══ -->
+  <div class="right-col">
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Fire a Charge</span>
+      </div>
+      <div class="card-body">
+
+        <div class="api-key-display" style="margin-bottom:16px">
+          <span class="api-key-label">API Key</span>
+          <span class="api-key-value" id="apiKeyDisplay">bouncer-dev-key-12345</span>
+        </div>
+
+        <div class="demo-form">
+          <div class="form-group">
+            <label class="form-label">Idempotency Key</label>
+            <input class="form-input" id="inputKey" value="" placeholder="auto-generated" />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Amount</label>
+              <input class="form-input" id="inputAmount" type="number" value="5000" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Currency</label>
+              <input class="form-input" id="inputCurrency" value="INR" maxlength="3" style="text-transform:uppercase" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Merchant Reference</label>
+            <input class="form-input" id="inputRef" value="order-demo-001" />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Payment Token</label>
+            <input class="form-input" id="inputToken" value="tok_visa_4242" />
+          </div>
+
+          <div class="btn-row">
+            <button class="btn-fire" id="btnFire" onclick="fireCharge()">Fire Charge</button>
+            <button class="btn-secondary" onclick="replayCharge()">Replay Last</button>
+          </div>
+
+          <div class="btn-row">
+            <button class="btn-secondary" onclick="fireBadKey()">Test: Invalid Key</button>
+            <button class="btn-secondary" onclick="fireRateLimit()">Test: Rate Limit</button>
+          </div>
+        </div>
+
+        <div class="divider" style="margin:16px 0"></div>
+
+        <div class="section-title">Response</div>
+        <div class="response-box" id="responseBox">Ready — fire a charge to see the response.</div>
+      </div>
+    </div>
+
+    <!-- Idempotency demo -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Idempotency Demo</span>
+      </div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:10px">
+        <p style="font-size:12px;color:var(--muted);line-height:1.6">
+          Submits the same charge request twice using an identical idempotency key. The second request returns the cached response without processing — confirming no double charge occurs.
+        </p>
+        <button class="btn-secondary" onclick="demoIdempotency()" style="width:100%">
+          Run Idempotency Test
+        </button>
+        <div class="response-box" id="idempResponseBox" style="min-height:60px">—</div>
+      </div>
+    </div>
+
+    <!-- Body mismatch demo -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Body Mismatch Demo</span>
+      </div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:10px">
+        <p style="font-size:12px;color:var(--muted);line-height:1.6">
+          Reuses an existing idempotency key with a different request body. Confirms the system rejects the conflicting request with a 409 Conflict response.
+        </p>
+        <button class="btn-secondary" onclick="demoMismatch()" style="width:100%">
+          Run Body Mismatch Test
+        </button>
+        <div class="response-box" id="mismatchResponseBox" style="min-height:60px">—</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const API_KEY    = 'bouncer-dev-key-12345';
+const API_BASE   = '/api/v1';
+const DASH_BASE  = '/dashboard';
+const HEALTH_URL = '/actuator/health';
+
+let lastKey = null;
+let queueHistory = Array(30).fill(0);
+
+// ── Auto-generate idempotency key ──────────────────────────────────────────
+function genKey() {
+  return 'demo-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,6);
+}
+
+document.getElementById('inputKey').value = genKey();
+
+// ── Poll data every 2 seconds ──────────────────────────────────────────────
+async function fetchStats() {
+  try {
+    const r = await fetch(DASH_BASE + '/stats');
+    const d = await r.json();
+    updateStats(d);
+  } catch(e) {}
+}
+
+async function fetchHealth() {
+  try {
+    const r = await fetch(HEALTH_URL);
+    const d = await r.json();
+    updateHealth(d);
+  } catch(e) {}
+}
+
+async function fetchCharges() {
+  try {
+    const r = await fetch(DASH_BASE + '/charges/recent');
+    const d = await r.json();
+    updateFeed(d);
+  } catch(e) {}
+}
+
+function updateStats(d) {
+  setVal('statSettled',    d.charges_settled);
+  setVal('statPending',    d.charges_pending);
+  setVal('statProcessing', d.charges_processing);
+  setVal('statFailed',     d.charges_failed);
+  setVal('stat429',        d.rate_limit_rejections);
+  setVal('stat401',        d.auth_failures);
+  setVal('statActive',     d.active_requests);
+  setVal('queueDepthMain', d.queue_depth);
+  setVal('queueDepthDlq',  d.dlq_depth);
+
+  // Update queue graph
+  queueHistory.push(d.queue_depth);
+  queueHistory.shift();
+  renderQueueGraph();
+
+  document.getElementById('lastUpdated').textContent =
+    new Date().toLocaleTimeString();
+}
+
+function setVal(id, val) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (val == null) { el.textContent = '—'; return; }
+  // Format numbers with thousand separators
+  el.textContent = (typeof val === 'number' || (typeof val === 'string' && !isNaN(val)))
+    ? Number(val).toLocaleString('en-IN')
+    : val;
+}
+
+function renderQueueGraph() {
+  const max = Math.max(...queueHistory, 1);
+  const container = document.getElementById('queueGraph');
+  container.innerHTML = queueHistory.map((v, i) => {
+    const h = Math.max(2, Math.round((v / max) * 56));
+    const cls = v === 0 ? '' : v > 10 ? 'high' : 'active';
+    return `<div class="queue-bar ${cls}" style="height:${h}px" title="${v} msgs"></div>`;
+  }).join('');
+}
+
+function updateHealth(d) {
+  const components = d.components || {};
+  const items = [
+    { key: 'db',            label: 'PostgreSQL' },
+    { key: 'redis',         label: 'Redis' },
+    { key: 'rabbit',        label: 'RabbitMQ' },
+    { key: 'rabbitQueues',  label: 'Queue Health' },
+    { key: 'redisDetail',   label: 'Redis Latency' },
+    { key: 'databaseDetail',label: 'DB Pool' },
+  ];
+
+  const grid = document.getElementById('healthGrid');
+  grid.innerHTML = items.map(item => {
+    const comp   = components[item.key] || {};
+    const status = comp.status || 'UNKNOWN';
+    const detail = buildDetail(item.key, comp.details);
+    return `
+      <div class="health-row">
+        <div class="health-name">${item.label}</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          ${detail ? `<span class="health-detail">${detail}</span>` : ''}
+          <span class="health-badge ${status === 'UP' ? 'badge-up' : 'badge-down'}">${status}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function buildDetail(key, d) {
+  if (!d) return '';
+  if (key === 'redisDetail')   return `${d.ping_latency_ms}ms · ${d.idempotency_keys_cached} keys`;
+  if (key === 'rabbitQueues')  return `main:${d.main_queue_messages} dlq:${d.dlq_messages}`;
+  if (key === 'databaseDetail') return `pool ${d.pool_active_connections}/${d.pool_total_connections} · settled:${d.charges_settled}`;
+  return '';
+}
+
+function updateFeed(charges) {
+  const feed = document.getElementById('chargeFeed');
+  if (!charges.length) {
+    feed.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">No transactions recorded. Submit a charge to begin.</div>';
+    return;
+  }
+  feed.innerHTML = charges.map(c => `
+    <div class="charge-row">
+      <div>
+        <div class="charge-id">${c.id.slice(0,8)}… · ${c.idempotency_key.slice(0,16)}</div>
+        <div class="charge-time">${timeAgo(c.created_at)}</div>
+      </div>
+      <div class="charge-amount">₹${Number(c.amount).toLocaleString('en-IN')} ${c.currency}</div>
+      <div class="charge-status status-${c.status}">${c.status}</div>
+    </div>`).join('');
+}
+
+function timeAgo(iso) {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60000) return Math.round(diff/1000) + 's ago';
+  if (diff < 3600000) return Math.round(diff/60000) + 'm ago';
+  return Math.round(diff/3600000) + 'h ago';
+}
+
+// ── API calls ──────────────────────────────────────────────────────────────
+async function fireCharge(key, amount, overrideKey) {
+  const idKey    = overrideKey || document.getElementById('inputKey').value || genKey();
+  const amt      = amount      || document.getElementById('inputAmount').value;
+  const currency = document.getElementById('inputCurrency').value.toUpperCase();
+  const ref      = document.getElementById('inputRef').value;
+  const token    = document.getElementById('inputToken').value;
+
+  const body = { idempotency_key: idKey, amount: parseFloat(amt),
+                 currency, merchant_reference: ref, payment_method_token: token };
+  lastKey = idKey;
+
+  const btn = document.getElementById('btnFire');
+  btn.disabled = true; btn.textContent = 'Sending…';
+
+  try {
+    const r = await fetch(API_BASE + '/charge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    const box = document.getElementById('responseBox');
+    box.textContent = JSON.stringify(d, null, 2);
+    box.className = 'response-box ' + (r.ok ? 'success' : r.status === 409 ? 'warn' : 'error');
+
+    // Auto-rotate key for next call
+    document.getElementById('inputKey').value = genKey();
+    await refreshAll();
+  } finally {
+    btn.disabled = false; btn.textContent = 'Fire Charge';
+  }
+}
+
+async function replayCharge() {
+  if (!lastKey) { alert('Fire a charge first'); return; }
+  const amt  = document.getElementById('inputAmount').value;
+  const box  = document.getElementById('responseBox');
+  const r = await fetch(API_BASE + '/charge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+    body: JSON.stringify({
+      idempotency_key: lastKey,
+      amount: parseFloat(amt),
+      currency: document.getElementById('inputCurrency').value.toUpperCase(),
+      merchant_reference: document.getElementById('inputRef').value,
+      payment_method_token: document.getElementById('inputToken').value
+    })
+  });
+  const d = await r.json();
+  box.textContent = '[REPLAY]\n' + JSON.stringify(d, null, 2);
+  box.className = 'response-box success';
+}
+
+async function fireBadKey() {
+  const box = document.getElementById('responseBox');
+  const r = await fetch(API_BASE + '/charge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': 'wrong-key-000' },
+    body: JSON.stringify({ idempotency_key: genKey(), amount: 100, currency: 'INR',
+                           merchant_reference: 'test', payment_method_token: 'tok' })
+  });
+  const d = await r.json();
+  box.textContent = '[401 UNAUTHORIZED]\n' + JSON.stringify(d, null, 2);
+  box.className = 'response-box error';
+  await refreshAll();
+}
+
+async function fireRateLimit() {
+  const box = document.getElementById('responseBox');
+  box.textContent = 'Firing 35 rapid requests…';
+  box.className = 'response-box';
+  let blocked = 0;
+  const promises = Array.from({length: 35}, (_, i) =>
+    fetch(API_BASE + '/charge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+      body: JSON.stringify({ idempotency_key: genKey(), amount: 100, currency: 'INR',
+                             merchant_reference: 'rate-test', payment_method_token: 'tok' })
+    }).then(r => { if (r.status === 429) blocked++; })
+  );
+  await Promise.all(promises);
+  box.textContent = `RATE LIMIT: ${blocked}/35 requests blocked (429)`;
+  box.className = 'response-box warn';
+  await refreshAll();
+}
+
+async function demoIdempotency() {
+  const box  = document.getElementById('idempResponseBox');
+  const key  = 'idem-demo-' + Date.now().toString(36);
+  const body = { idempotency_key: key, amount: 9999, currency: 'INR',
+                 merchant_reference: 'idem-test', payment_method_token: 'tok_idem' };
+
+  box.textContent = '[1] Sending first request…'; box.className = 'response-box';
+  const r1 = await fetch(API_BASE + '/charge', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+    body: JSON.stringify(body)
+  });
+  const d1 = await r1.json();
+
+  await new Promise(res => setTimeout(res, 600));
+
+  box.textContent += '\n[OK] First: charge_id=' + d1.charge_id + '\n\n2️⃣ Replaying same key…';
+
+  const r2 = await fetch(API_BASE + '/charge', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+    body: JSON.stringify(body)
+  });
+  const d2 = await r2.json();
+
+  const match = d1.charge_id === d2.charge_id;
+  box.textContent += '\n' + (match ? '[OK]' : '[FAIL]') + ' Replay: charge_id=' + d2.charge_id +
+    '\n\n' + (match ? 'RESULT: Identical charge_id — no double charge.' : 'RESULT: IDs differ — idempotency failure.');
+  box.className = 'response-box ' + (match ? 'success' : 'error');
+  await refreshAll();
+}
+
+async function demoMismatch() {
+  const box = document.getElementById('mismatchResponseBox');
+  const key = 'mismatch-' + Date.now().toString(36);
+  const base = { idempotency_key: key, currency: 'INR',
+                 merchant_reference: 'mis-test', payment_method_token: 'tok_mis' };
+
+  box.textContent = '[1] First request: amount=INR 500…'; box.className = 'response-box';
+  await fetch(API_BASE + '/charge', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+    body: JSON.stringify({ ...base, amount: 500 })
+  });
+
+  await new Promise(res => setTimeout(res, 400));
+
+  const r2 = await fetch(API_BASE + '/charge', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+    body: JSON.stringify({ ...base, amount: 999 })
+  });
+  const d2 = await r2.json();
+
+  box.textContent += '\n2️⃣ Same key, amount=999\n\n' +
+    (r2.status === 409 ? 'RESULT: 409 Conflict — ' + d2.reason : 'RESULT: Expected 409, got ' + r2.status) + '\n' +
+    JSON.stringify(d2, null, 2);
+  box.className = 'response-box ' + (r2.status === 409 ? 'warn' : 'error');
+  await refreshAll();
+}
+
+async function refreshAll() {
+  await Promise.all([fetchStats(), fetchHealth(), fetchCharges()]);
+}
+
+// ── Polling ────────────────────────────────────────────────────────────────
+refreshAll();
+setInterval(refreshAll, 2000);
+</script>
+</body>
+</html>
