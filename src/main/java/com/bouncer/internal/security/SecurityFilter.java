@@ -12,24 +12,22 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Single filter handling three concerns:
+ * Security filter handling three concerns:
  *
- * 1. API Key Authentication — X-API-Key header required on /api/** routes.
- *    Missing or wrong key → 401 Unauthorized.
+ * 1. API Key Authentication — constant-time comparison via MessageDigest.isEqual()
+ *    to prevent timing attacks. Logs every failure without leaking the key.
  *
  * 2. Rate Limiting — sliding window per API key.
- *    Exceeding limit → 429 Too Many Requests.
+ *    Exceeding limit returns 429 Too Many Requests.
  *
- * 3. Active Request Tracking — increments/decrements the active
- *    request gauge so graceful shutdown can be observed live.
- *
- * Actuator endpoints (/actuator/**) and the dashboard (/) are excluded.
+ * 3. Active Request Tracking — increments/decrements live gauge.
  */
 @Component
 public class SecurityFilter extends OncePerRequestFilter {
@@ -37,34 +35,32 @@ public class SecurityFilter extends OncePerRequestFilter {
     private static final Logger log = LoggerFactory.getLogger(SecurityFilter.class);
 
     private static final String API_KEY_HEADER = "X-API-Key";
-    private static final int    RATE_LIMIT     = 30;  // requests per window
-    private static final long   WINDOW_MS      = 10_000; // 10 second window
+    private static final int    RATE_LIMIT     = 30;
+    private static final long   WINDOW_MS      = 10_000L;
 
-    private final String validApiKey;
+    private final byte[] validApiKeyBytes;
     private final SecurityMetrics metrics;
-
-    // Simple in-memory rate limiter: apiKey → (windowStart, count)
     private final Map<String, long[]> rateLimitStore = new ConcurrentHashMap<>();
 
     public SecurityFilter(
-            @Value("${bouncer.security.api-key:bouncer-dev-key-12345}") String validApiKey,
+            @Value("${bouncer.security.api-key}") String validApiKey,
             SecurityMetrics metrics
     ) {
-        this.validApiKey = validApiKey;
-        this.metrics     = metrics;
+        // Store as bytes once at startup — never log or expose the raw key
+        this.validApiKeyBytes = validApiKey.getBytes(StandardCharsets.UTF_8);
+        this.metrics          = metrics;
     }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        // Skip auth for actuator, dashboard, and static assets
         return path.startsWith("/actuator")
                 || path.startsWith("/dashboard")
                 || path.equals("/")
                 || path.startsWith("/static")
                 || path.endsWith(".html")
-                || path.endsWith(".js")
-                || path.endsWith(".css");
+                || path.endsWith(".css")
+                || path.endsWith(".js");
     }
 
     @Override
@@ -77,8 +73,10 @@ public class SecurityFilter extends OncePerRequestFilter {
         String path   = request.getRequestURI();
         String apiKey = request.getHeader(API_KEY_HEADER);
 
-        // ── 1. API Key check ──────────────────────────────────────────────
-        if (apiKey == null || !apiKey.equals(validApiKey)) {
+        // ── 1. Constant-time API key validation ───────────────────────────
+        // MessageDigest.isEqual() compares every byte regardless of where
+        // a mismatch occurs — eliminates timing oracle attacks.
+        if (!isValidKey(apiKey)) {
             metrics.recordAuthFailure();
             log.warn("auth_failure path={} ip={} key_present={}",
                     path, request.getRemoteAddr(), apiKey != null);
@@ -87,12 +85,16 @@ public class SecurityFilter extends OncePerRequestFilter {
             return;
         }
 
-        // ── 2. Rate limit check ───────────────────────────────────────────
-        if (isRateLimited(apiKey)) {
+        // ── 2. Rate limiting ──────────────────────────────────────────────
+        // Key for rate limiting is the SHA-256 of the API key so we never
+        // store the raw secret in memory maps either.
+        String rateLimitKey = hashKey(apiKey);
+        if (isRateLimited(rateLimitKey)) {
             metrics.recordRateLimitRejection();
-            log.warn("rate_limit_exceeded path={} key={}", path, maskKey(apiKey));
+            log.warn("rate_limit_exceeded path={}", path);
             sendError(response, 429, "Too Many Requests",
-                    "Rate limit exceeded. Max " + RATE_LIMIT + " requests per " + (WINDOW_MS / 1000) + "s");
+                    "Rate limit exceeded. Max " + RATE_LIMIT +
+                    " requests per " + (WINDOW_MS / 1000) + "s");
             return;
         }
 
@@ -105,9 +107,44 @@ public class SecurityFilter extends OncePerRequestFilter {
         }
     }
 
-    private boolean isRateLimited(String apiKey) {
+    /**
+     * Constant-time comparison using MessageDigest.isEqual().
+     * Hashing both sides first ensures equal-length byte arrays,
+     * which is required for isEqual() to be timing-safe.
+     */
+    private boolean isValidKey(String providedKey) {
+        if (providedKey == null) return false;
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] provided = digest.digest(
+                    providedKey.getBytes(StandardCharsets.UTF_8));
+            digest.reset();
+            byte[] expected = digest.digest(validApiKeyBytes);
+            return MessageDigest.isEqual(provided, expected);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * SHA-256 of the key — used as the rate-limit map key so the raw
+     * secret is never stored in the ConcurrentHashMap.
+     */
+    private String hashKey(String key) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(key.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (byte b : hash) hex.append(String.format("%02x", b));
+            return hex.toString().substring(0, 16); // first 16 hex chars is enough
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
+
+    private boolean isRateLimited(String key) {
         long now = Instant.now().toEpochMilli();
-        long[] state = rateLimitStore.compute(apiKey, (k, existing) -> {
+        long[] state = rateLimitStore.compute(key, (k, existing) -> {
             if (existing == null || now - existing[0] > WINDOW_MS) {
                 return new long[]{now, 1};
             }
@@ -117,18 +154,13 @@ public class SecurityFilter extends OncePerRequestFilter {
         return state[1] > RATE_LIMIT;
     }
 
-    private void sendError(HttpServletResponse response, int status, String error, String message)
-            throws IOException {
+    private void sendError(HttpServletResponse response, int status,
+                           String error, String message) throws IOException {
         response.setStatus(status);
         response.setContentType("application/json");
         response.getWriter().write(String.format(
                 "{\"status\":%d,\"error\":\"%s\",\"message\":\"%s\",\"timestamp\":\"%s\"}",
                 status, error, message, Instant.now()
         ));
-    }
-
-    private String maskKey(String key) {
-        if (key == null || key.length() < 8) return "****";
-        return key.substring(0, 4) + "****";
     }
 }

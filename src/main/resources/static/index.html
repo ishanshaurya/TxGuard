@@ -617,7 +617,7 @@
 
         <div class="api-key-display" style="margin-bottom:16px">
           <span class="api-key-label">API Key</span>
-          <span class="api-key-value" id="apiKeyDisplay">bouncer-dev-key-12345</span>
+          <span class="api-key-value" id="apiKeyDisplay">Set via BOUNCER_API_KEY env var</span>
         </div>
 
         <div class="demo-form">
@@ -701,7 +701,7 @@
 </div>
 
 <script>
-const API_KEY    = 'bouncer-dev-key-12345';
+const API_KEY    = window.TXGUARD_API_KEY || '';
 const API_BASE   = '/api/v1';
 const DASH_BASE  = '/dashboard';
 const HEALTH_URL = '/actuator/health';

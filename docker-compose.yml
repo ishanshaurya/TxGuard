@@ -109,6 +109,7 @@ services:
       SPRING_RABBITMQ_USERNAME: bouncer
       SPRING_RABBITMQ_PASSWORD: rabbit_secret
       SPRING_RABBITMQ_VIRTUAL_HOST: bouncer_vhost
+      SPRING_PROFILES_ACTIVE: dev
     ports:
       - "8080:8080"
     networks:
