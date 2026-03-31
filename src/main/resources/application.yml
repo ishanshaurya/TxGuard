@@ -93,7 +93,7 @@ bouncer:
   idempotency:
     ttl-hours: 24
   security:
-    api-key: ${BOUNCER_API_KEY}
+    api-key: ${BOUNCER_API_KEY:bouncer-dev-key-12345}
     rate-limit: 30
     rate-window-seconds: 10
 

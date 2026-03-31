@@ -98,7 +98,7 @@ public class RabbitMQQueueHealthIndicator implements HealthIndicator {
         }
     }
 
-    private int intProp(Properties props, Object key) {
+    private int intProp(Properties props, String key) {
         Object val = props.get(key);
         if (val instanceof Integer i) return i;
         if (val instanceof Long l)    return l.intValue();

@@ -165,4 +165,3 @@ public class InfrastructureConfig {
         return template;
     }
 }
-// NOTE: append this bean inside the class before the closing brace

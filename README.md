@@ -89,7 +89,7 @@ Single-page operations dashboard at `/` showing real-time charge feed, queue dep
 ### Run
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/txguard.git
+git clone https://github.com/ishanshaurya/txguard.git
 cd txguard
 docker compose up --build
 ```

@@ -5,6 +5,26 @@ import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
+/**
+ * Health indicator for Redis — measures round-trip latency with PING.
+ *
+ * <p>Exposes at {@code GET /actuator/health/redisDetail}:
+ * <pre>
+ * {
+ *   "status": "UP",
+ *   "details": {
+ *     "ping_latency_ms": 1,
+ *     "idempotency_keys_sample": 42
+ *   }
+ * }
+ * </pre>
+ *
+ * <p>Status is DOWN if:
+ * <ul>
+ *   <li>Redis is unreachable</li>
+ *   <li>PING latency exceeds 500ms (severely degraded)</li>
+ * </ul>
+ */
 @Component("redisDetail")
 public class RedisHealthIndicator implements HealthIndicator {
 
@@ -25,6 +45,7 @@ public class RedisHealthIndicator implements HealthIndicator {
                     .ping();
             long latencyMs = System.currentTimeMillis() - start;
 
+            // Count idempotency keys as a useful operational metric
             var keys = redisTemplate.keys("idempotency:charge:*");
             long keyCount = keys != null ? keys.size() : 0;
 
