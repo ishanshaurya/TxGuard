@@ -1,55 +1,49 @@
-# 🛡 ShipSafe
+# TxGuard — Transactional Safety Gateway
 
-**Build, Validate & Deploy AI Responsibly**
+A production-grade, idempotent payment gateway built with Spring Boot 3, designed to prevent double charges, ensure exactly-once processing, and provide full observability into every transaction.
 
-*Don't just ship fast. Ship safe.*
-
-ShipSafe is an all-in-one developer toolkit for building, validating, and deploying AI projects responsibly. Every feature answers one of three core questions in a developer's deployment pipeline: **Is my code safe?** → **Is my project legal?** → **Am I ready to ship?**
-
-🔗 **Live Demo:** [shipsafe-app.vercel.app](https://shipsafe-app.vercel.app)
+**Live:** [https://txguard-prod.up.railway.app](https://txguard-prod.up.railway.app)
 
 ---
 
-## The Pipeline
+## The Problem It Solves
 
-| Stage 1: CODE | Stage 2: LEGAL | Stage 3: DEPLOY |
-|---|---|---|
-| *"Is my code safe?"* | *"Is my project legal?"* | *"Am I ready to ship?"* |
-| AI Debugger + Vibe-Code Audit | Regulation Tracker + Loophole Finder | Deploy Checker + Stress Tester |
+When a payment request is sent over a network, retries are inevitable — a timeout, a dropped connection, or a client bug can cause the same charge to be submitted multiple times. Without protection, this means double charges.
+
+**TxGuard guarantees that no matter how many times the same request is retried, the customer is charged exactly once.**
 
 ---
 
-## Features
-
-### 🐛 AI Code Debugger
-Paste any code and get an instant AI analysis covering bugs, security vulnerabilities, and **vibe-code smells** — patterns unique to AI-generated code that real developers wouldn't write (hardcoded secrets, no error handling, hallucinated imports, console.log everywhere).
-
-<!-- ![AI Debugger Screenshot](screenshots/debugger.png) -->
-
-### 🔍 Vibe-Code Audit
-Goes beyond single-file debugging. Paste your entire project structure and get a **scored report card** across 5 categories: Security, Code Quality, Maintainability, AI-Pattern Detection, and Deployment Readiness.
-
-<!-- ![Vibe-Code Audit Screenshot](screenshots/audit.png) -->
-
-### 🔑 Loophole Finder
-Describe your AI system and select target deployment countries. The AI cross-references regulation databases to find **legal grey areas** — where the law is ambiguous, enforcement is unclear, or competitors might exploit gaps. References real regulations: EU AI Act, India's DPDP Act, US Executive Order on AI, and more.
-
-<!-- ![Loophole Finder Screenshot](screenshots/loopholes.png) -->
-
-### 🚀 Deploy Readiness Checker
-The final gate before shipping. Describe your deployment setup and the AI checks for common production gotchas: missing env vars, CORS misconfig, no rate limiting, missing security headers, and platform-specific issues for Vercel, Netlify, AWS, Railway, and more.
-
-<!-- ![Deploy Checker Screenshot](screenshots/deploy-check.png) -->
-
-### ⚡ Stress Tester
-A simulated load testing tool. Describe your stack and the AI predicts bottlenecks at 10, 100, 1,000, and 10,000 concurrent users — identifying which component breaks first and what the fix is. Includes realistic analysis of free-tier limits (Vercel, Supabase, etc.).
-
-<!-- ![Stress Tester Screenshot](screenshots/stress-test.png) -->
-
-### 📊 Dashboard
-Track all your scans in one place. Shows scan history, scores, issue counts, and quick actions to every tool. Logged-in users get persistent scan history via Supabase.
-
-<!-- ![Dashboard Screenshot](screenshots/dashboard.png) -->
+## Architecture
+```
+Client Application
+        │
+        │  POST /api/v1/charge
+        │  X-API-Key: <key>
+        ▼
+┌─────────────────────────────────────────────────────┐
+│                    TxGuard                          │
+│                                                     │
+│  SecurityFilter ──► Rate Limit (30 req/10s)         │
+│       │             Auth (X-API-Key)                │
+│       ▼                                             │
+│  IdempotencyService ──► Redis                       │
+│       │                 (24h key cache)             │
+│       ▼                                             │
+│  ChargeService ──► PostgreSQL                       │
+│       │            (PENDING → PROCESSING            │
+│       │             → SETTLED | FAILED)             │
+│       ▼                                             │
+│  RabbitMQ Publisher ──► Queue                       │
+│                          │                         │
+│                     Consumer ──► Settle/Fail        │
+│                          │       (3 retries)        │
+│                        DLQ ──► Manual review        │
+└─────────────────────────────────────────────────────┘
+        │
+        ▼
+   Dashboard: https://txguard-prod.up.railway.app
+```
 
 ---
 
@@ -57,177 +51,258 @@ Track all your scans in one place. Shows scan history, scores, issue counts, and
 
 | Layer | Technology |
 |---|---|
-| **Frontend** | React 19 + Vite + React Router |
-| **Styling** | Tailwind CSS + custom dark theme |
-| **Backend/DB** | Supabase (Auth + PostgreSQL + Row Level Security) |
-| **AI Engine** | Google Gemini 2.5 Flash (primary) + Groq LLaMA 3.3 70B (fallback) |
-| **Hosting** | Vercel (free tier) |
-| **API Security** | Vercel Serverless Functions (API keys never reach the browser) |
+| Runtime | Java 21, Spring Boot 3.3 |
+| API | Spring MVC, Bean Validation |
+| Idempotency | Redis 7 (SET NX, 24h TTL) |
+| Persistence | PostgreSQL 16, Flyway, Spring Data JPA |
+| Messaging | RabbitMQ 3.13, Spring AMQP |
+| Observability | Micrometer, Prometheus, Spring Actuator |
+| Security | API Key auth, sliding window rate limiter |
+| Infrastructure | Docker, Docker Compose, Railway |
 
 ---
 
-## Architecture
+## Key Features
 
-```
-┌──────────────────┐         ┌──────────────────┐         ┌──────────────┐
-│   React Frontend │──POST──▶│  /api/claude      │──────▶  │  Gemini 2.5  │
-│   (Vite + React  │         │  (Vercel          │         │  Flash       │
-│    Router)       │◀──JSON──│   Serverless)     │◀──────  │              │
-└──────────────────┘         └──────────────────┘         └──────────────┘
-        │                            │                     ┌──────────────┐
-        │                            └─── fallback ──────▶ │  Groq LLaMA  │
-        │                                                  │  3.3 70B     │
-        │                                                  └──────────────┘
-        │ if (user logged in)
-        └──── save scan ────▶  Supabase (PostgreSQL + RLS)
-```
+**Idempotency Gate**
+Every request carries a unique `idempotency_key`. Redis atomically claims each key using `SET NX`. Duplicate requests with the same key return the original response instantly. Duplicate requests with a different body are rejected with `409 Conflict`.
 
-**Key design decisions:**
-- **Serverless proxy pattern** — React calls `/api/claude`, the serverless function adds the API key and forwards to Gemini. API keys never appear in frontend code.
-- **Automatic fallback** — If Gemini fails, the proxy automatically tries Groq. No frontend changes needed.
-- **Service layer** — `scanService.js` centralizes all AI calls. One function (`callAI`) handles prompt building, fetching, JSON parsing, and validation for all 5 tools.
-- **Row Level Security** — Supabase RLS ensures users can only see their own scan history.
+**Async Processing Pipeline**
+The HTTP layer returns immediately after persisting a `PENDING` charge and publishing to RabbitMQ. A consumer handles settlement asynchronously. Failed messages are retried 3 times with exponential backoff before routing to a dead-letter queue.
+
+**Full Audit Trail**
+Every status transition (`PENDING → PROCESSING → SETTLED | FAILED`) is recorded in `charge_status_history` — an append-only PostgreSQL table. Nothing is ever updated without a history row.
+
+**Rate Limiting**
+30 requests per 10-second sliding window per API key. Exceeding the limit returns `429 Too Many Requests`.
+
+**Live Dashboard**
+Single-page operations dashboard at `/` showing real-time charge feed, queue depth graph, component health, security counters, and an interactive charge submission panel.
 
 ---
 
-## Getting Started
+## Live Demo
+
+TxGuard is deployed on Railway. Try it:
+```bash
+# Health check
+curl -s https://txguard-prod.up.railway.app/actuator/health | python3 -m json.tool
+
+# Fire a charge (requires API key)
+curl -s -X POST https://txguard-prod.up.railway.app/api/v1/charge \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: <your-api-key>" \
+  -d '{
+    "idempotency_key": "demo-001",
+    "amount": 5000,
+    "currency": "INR",
+    "merchant_reference": "demo-order",
+    "payment_method_token": "tok_visa_4242"
+  }' | python3 -m json.tool
+```
+
+Dashboard: [https://txguard-prod.up.railway.app](https://txguard-prod.up.railway.app)
+
+---
+
+## Quick Start (Local)
 
 ### Prerequisites
-- Node.js 18+
-- A [Supabase](https://supabase.com) project (free tier)
-- A [Google AI Studio](https://aistudio.google.com) API key (free tier)
-- Optional: A [Groq](https://console.groq.com) API key for fallback (free tier)
+- Docker Desktop 24+
+- No other dependencies needed — Maven and Java run inside the container
 
-### Setup
-
+### Run
 ```bash
-# Clone the repo
-git clone https://github.com/ishanshaurya/shipsafe.git
-cd shipsafe
-
-# Install dependencies
-npm install
-
-# Create environment file
-cp .env.example .env.local
+git clone https://github.com/ishanshaurya/TxGuard.git
+cd TxGuard
+docker compose up --build
 ```
 
-Add your keys to `.env.local`:
-```env
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-GEMINI_API_KEY=your_gemini_key
-GROQ_API_KEY=your_groq_key          # optional fallback
+Wait for:
+```
+txguard-app | Started TxGuardApplication in X.XXXs
 ```
 
-> ⚠️ **Note:** `GEMINI_API_KEY` and `GROQ_API_KEY` have no `VITE_` prefix — they run server-side only and are never exposed to the browser.
+Open **http://localhost:8080** for the dashboard.
 
-### Run locally
-
+### Fire a charge
 ```bash
-# Frontend only (AI features won't work — use deployed URL to test AI)
-npm run dev
-
-# Full stack locally (requires Vercel CLI)
-npx vercel dev
+curl -s -X POST http://localhost:8080/api/v1/charge \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: txguard-dev-key-12345" \
+  -d '{
+    "idempotency_key":      "order-001",
+    "amount":               5000,
+    "currency":             "INR",
+    "merchant_reference":   "swiggy-order-9821",
+    "payment_method_token": "tok_visa_4242"
+  }' | python3 -m json.tool
 ```
 
-### Deploy to Vercel
-
+### Prove idempotency works
 ```bash
-# Push to GitHub — Vercel auto-deploys
-git push
+# Send the same request twice — both return the same charge_id
+KEY="test-$(date +%s)"
 
-# Or deploy manually
-npx vercel --prod
+curl -s -X POST http://localhost:8080/api/v1/charge \
+  -H "X-API-Key: txguard-dev-key-12345" \
+  -H "Content-Type: application/json" \
+  -d "{\"idempotency_key\":\"$KEY\",\"amount\":1000,\"currency\":\"INR\",\"merchant_reference\":\"test\",\"payment_method_token\":\"tok\"}"
+
+# Replay — same charge_id, no double charge
+curl -s -X POST http://localhost:8080/api/v1/charge \
+  -H "X-API-Key: txguard-dev-key-12345" \
+  -H "Content-Type: application/json" \
+  -d "{\"idempotency_key\":\"$KEY\",\"amount\":1000,\"currency\":\"INR\",\"merchant_reference\":\"test\",\"payment_method_token\":\"tok\"}"
 ```
 
-Add environment variables in Vercel dashboard → Settings → Environment Variables.
+---
+
+## API Reference
+
+### POST /api/v1/charge
+
+**Headers**
+
+| Header | Required | Description |
+|---|---|---|
+| `X-API-Key` | Yes | API key for authentication |
+| `Content-Type` | Yes | `application/json` |
+
+**Request Body**
+```json
+{
+  "idempotency_key":      "string (max 64 chars, unique per charge attempt)",
+  "amount":               1000,
+  "currency":             "INR",
+  "merchant_reference":   "string (your internal order ID)",
+  "payment_method_token": "string (payment instrument token)"
+}
+```
+
+**Response**
+```json
+{
+  "idempotency_key": "order-001",
+  "charge_id":       "550e8400-e29b-41d4-a716-446655440000",
+  "status":          "PENDING",
+  "message":         "Charge accepted — processing asynchronously",
+  "processed_at":    "2024-01-01T00:00:00Z"
+}
+```
+
+**Status codes**
+
+| Code | Meaning |
+|---|---|
+| `200` | Charge accepted or idempotent replay |
+| `400` | Validation failure — check `fields` array |
+| `401` | Missing or invalid API key |
+| `409` | Idempotency conflict — body mismatch or key in-flight |
+| `429` | Rate limit exceeded |
+| `500` | Internal error |
+
+---
+
+## Observability Endpoints
+
+| Endpoint | Description |
+|---|---|
+| `GET /actuator/health` | Full component health with detail |
+| `GET /actuator/metrics` | All Micrometer metrics |
+| `GET /actuator/prometheus` | Prometheus scrape endpoint |
+| `GET /dashboard/stats` | Live dashboard stats (JSON) |
+| `GET /dashboard/charges/recent` | Last 10 charges |
 
 ---
 
 ## Project Structure
-
 ```
-shipsafe/
-├── api/
-│   └── claude.js              # Serverless proxy → Gemini / Groq
-├── src/
-│   ├── components/
-│   │   └── Layout.jsx         # Shared navbar + sidebar + dark theme
-│   ├── pages/
-│   │   ├── Dashboard.jsx      # User home (scan history, quick actions)
-│   │   ├── Debugger.jsx       # AI Code Debugger
-│   │   ├── Audit.jsx          # Vibe-Code Audit
-│   │   ├── Loopholes.jsx      # Loophole Finder
-│   │   ├── DeployCheck.jsx    # Deploy Readiness Checker
-│   │   ├── StressTest.jsx     # Stress Tester
-│   │   ├── Regulations.jsx    # AI Regulation Tracker
-│   │   ├── Landing.jsx        # Public landing page
-│   │   └── Login.jsx          # Auth page
-│   ├── services/
-│   │   ├── scanService.js     # AI call handler (all tools use this)
-│   │   └── supabaseService.js # Database operations with error handling
-│   ├── data/
-│   │   └── mockResults.js     # Demo data for logged-out users
-│   ├── hooks/
-│   │   ├── useAuth.js         # Auth state hook
-│   │   └── useIsMobile.js     # Responsive breakpoint hook
-│   ├── lib/
-│   │   └── supabase.js        # Supabase client init
-│   └── App.jsx                # Router setup
-├── vercel.json                # SPA routing rewrites
-├── package.json
-└── README.md
+src/main/java/com/txguard/
+├── internal/
+│   ├── config/          # Spring configuration, exception handlers
+│   ├── controller/      # HTTP boundary (ChargeController, DashboardDataController)
+│   ├── entity/          # JPA entities (Charge, ChargeStatusHistory)
+│   ├── exception/       # Domain exceptions
+│   ├── messaging/       # RabbitMQ publisher + consumer
+│   ├── model/           # Request/response DTOs, enums
+│   ├── observability/   # Health indicators, Micrometer metrics
+│   ├── repository/      # Spring Data repositories
+│   ├── security/        # API key filter, rate limiter, security metrics
+│   └── service/         # Business logic (ChargeService, IdempotencyService)
+└── TxGuardApplication.java
+
+src/main/resources/
+├── db/migration/        # Flyway SQL migrations
+├── static/              # Dashboard HTML
+└── application.yml      # Configuration
 ```
 
 ---
 
-## Supabase Schema
+## Deployment (Railway)
 
-| Table | Purpose |
+TxGuard runs on [Railway](https://railway.app) with managed PostgreSQL, Redis, and RabbitMQ.
+
+**Required environment variables:**
+
+| Variable | Description |
 |---|---|
-| `scan_history` | Stores all scan results (debugger, audit, loopholes, deploy-check, stress-test) |
-| `regulations` | AI regulation data (14 countries) — public read |
-| `reports` | Public shareable reports (coming soon) |
-
-All tables use **Row Level Security (RLS)** — users can only access their own data.
-
----
-
-## Environment Variables
-
-| Variable | Where it runs | Purpose |
-|---|---|---|
-| `VITE_SUPABASE_URL` | Browser | Supabase project URL |
-| `VITE_SUPABASE_ANON_KEY` | Browser | Supabase public key (safe to expose — RLS protects data) |
-| `GEMINI_API_KEY` | Server only | Google Gemini API key |
-| `GROQ_API_KEY` | Server only | Groq API key (optional fallback) |
+| `TXGUARD_API_KEY` | Production API key |
+| `SPRING_PROFILES_ACTIVE` | `prod` |
+| `SPRING_DATASOURCE_URL` | PostgreSQL JDBC URL |
+| `SPRING_DATASOURCE_USERNAME` | PostgreSQL username |
+| `SPRING_DATASOURCE_PASSWORD` | PostgreSQL password |
+| `SPRING_DATA_REDIS_HOST` | Redis host |
+| `SPRING_DATA_REDIS_PORT` | Redis port |
+| `SPRING_DATA_REDIS_PASSWORD` | Redis password |
+| `SPRING_RABBITMQ_HOST` | RabbitMQ host |
+| `SPRING_RABBITMQ_PORT` | RabbitMQ port |
+| `SPRING_RABBITMQ_USERNAME` | RabbitMQ username |
+| `SPRING_RABBITMQ_PASSWORD` | RabbitMQ password |
+| `SPRING_RABBITMQ_VIRTUAL_HOST` | `/` |
 
 ---
 
-## Roadmap
+## Development
 
-- [x] AI Debugger with real Gemini analysis
-- [x] Vibe-Code Audit with 5-category scoring
-- [x] Loophole Finder with country-specific regulations
-- [x] Deploy Readiness Checker
-- [x] Stress Tester with tier-based predictions
-- [x] Supabase Auth (email + GitHub)
-- [x] Scan history dashboard
-- [x] Groq fallback API
-- [x] Mobile responsive
-- [ ] Public shareable reports (/report/:id)
-- [ ] PDF export for reports
-- [ ] Real regulation data API integration
-- [ ] Rate limiting on AI proxy
+### Stress tests
+```bash
+chmod +x stress-test*.sh
+
+./stress-test.sh             # Phase 1 — 100 basic requests
+./stress-test-phase2.sh      # Phase 2 — idempotency scenarios
+./stress-test-phase3.sh      # Phase 3 — persistence + UUIDs
+./stress-test-phase4.sh      # Phase 4 — async settlement
+./stress-test-phase5.sh      # Phase 5 — observability
+./stress-test-phase6.sh      # Phase 6 — auth + rate limiting
+```
+
+### Inspect the database
+```bash
+docker exec -it txguard-postgres psql -U txguard -d txguard \
+  -c "SELECT id, status, amount, currency, created_at FROM charges ORDER BY created_at DESC LIMIT 10;"
+```
+
+### Inspect RabbitMQ
+
+Management UI: **http://localhost:15672**
 
 ---
 
-## Built By
+## Built In Phases
 
-**Shaurya Ishan** — [GitHub](https://github.com/ishanshaurya)
+| Phase | Feature |
+|---|---|
+| 1 | Spring Boot scaffold, Docker Compose stack, HTTP endpoint |
+| 2 | Redis idempotency gate — exactly-once guarantee |
+| 3 | PostgreSQL persistence, state machine, audit log |
+| 4 | RabbitMQ async pipeline, DLQ, 3x retry with backoff |
+| 5 | Micrometer metrics, health indicators, Prometheus endpoint |
+| 6 | API key auth, rate limiting, live operations dashboard |
 
 ---
 
-*ShipSafe • Don't just ship fast. Ship safe.*
+## License
+
+MIT
