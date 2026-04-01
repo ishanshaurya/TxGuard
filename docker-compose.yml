@@ -1,4 +1,4 @@
-  bouncer-net:
+  txguard-net:
     driver: bridge
 
 volumes:
@@ -12,20 +12,20 @@ services:
   # ──────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
-    container_name: bouncer-postgres
+    container_name: txguard-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: bouncer
-      POSTGRES_USER: bouncer
+      POSTGRES_DB: txguard
+      POSTGRES_USER: txguard
       POSTGRES_PASSWORD: bouncer_secret
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
-      - bouncer-net
+      - txguard-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bouncer -d bouncer"]
+      test: ["CMD-SHELL", "pg_isready -U txguard -d txguard"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -36,13 +36,13 @@ services:
   # ──────────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    container_name: bouncer-redis
+    container_name: txguard-redis
     restart: unless-stopped
     command: redis-server --requirepass redis_secret --appendonly yes
     ports:
       - "6379:6379"
     networks:
-      - bouncer-net
+      - txguard-net
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "redis_secret", "ping"]
       interval: 10s
@@ -55,19 +55,19 @@ services:
   # ──────────────────────────────────────────────
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
-    container_name: bouncer-rabbitmq
+    container_name: txguard-rabbitmq
     restart: unless-stopped
     environment:
-      RABBITMQ_DEFAULT_USER: bouncer
+      RABBITMQ_DEFAULT_USER: txguard
       RABBITMQ_DEFAULT_PASS: rabbit_secret
-      RABBITMQ_DEFAULT_VHOST: bouncer_vhost
+      RABBITMQ_DEFAULT_VHOST: txguard_vhost
     ports:
       - "5672:5672"   # AMQP
       - "15672:15672" # Management UI → http://localhost:15672
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     networks:
-      - bouncer-net
+      - txguard-net
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 15s
@@ -82,7 +82,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: bouncer-app
+    container_name: txguard-app
     restart: unless-stopped
     depends_on:
       postgres:
@@ -93,8 +93,8 @@ services:
         condition: service_healthy
     environment:
       # Database
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/bouncer
-      SPRING_DATASOURCE_USERNAME: bouncer
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/txguard
+      SPRING_DATASOURCE_USERNAME: txguard
       SPRING_DATASOURCE_PASSWORD: bouncer_secret
       # Redis — hostname matches the service name above
       SPRING_DATA_REDIS_HOST: redis
@@ -103,14 +103,14 @@ services:
       # RabbitMQ — hostname matches the service name above
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_RABBITMQ_PORT: 5672
-      SPRING_RABBITMQ_USERNAME: bouncer
+      SPRING_RABBITMQ_USERNAME: txguard
       SPRING_RABBITMQ_PASSWORD: rabbit_secret
-      SPRING_RABBITMQ_VIRTUAL_HOST: bouncer_vhost
+      SPRING_RABBITMQ_VIRTUAL_HOST: txguard_vhost
       SPRING_PROFILES_ACTIVE: dev
     ports:
       - "8080:8080"
     networks:
-      - bouncer-net
+      - txguard-net
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health || exit 1"]
       interval: 15s

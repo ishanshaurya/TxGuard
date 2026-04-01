@@ -12,7 +12,7 @@ spring:
       minimum-idle: 2
       connection-timeout: 30000
       idle-timeout: 600000
-      pool-name: BounceHikariPool
+      pool-name: TxGuardHikariPool
       register-mbeans: true
 
   jpa:
@@ -93,7 +93,7 @@ txguard:
   idempotency:
     ttl-hours: 24
   security:
-    api-key: ${TXGUARD_API_KEY:bouncer-dev-key-12345}
+    api-key: ${TXGUARD_API_KEY:txguard-dev-key-12345}
     rate-limit: 30
     rate-window-seconds: 10
 

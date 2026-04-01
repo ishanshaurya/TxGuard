@@ -14,10 +14,10 @@
   </parent>
 
   <!-- ── Project coordinates ── -->
-  <groupId>com.bouncer</groupId>
-  <artifactId>payment-bouncer</artifactId>
+  <groupId>com.txguard</groupId>
+  <artifactId>txguard</artifactId>
   <version>0.1.0-SNAPSHOT</version>
-  <name>payment-bouncer</name>
+  <name>txguard</name>
   <description>TxGuard — Transactional Safety Gateway</description>
   <packaging>jar</packaging>
 

@@ -6,7 +6,7 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
-API_KEY="bouncer-dev-key-12345"
+API_KEY="txguard-dev-key-12345"
 PASS=0; FAIL=0; ERRORS=()
 
 pass() { PASS=$(( PASS + 1 )); printf "  ✓ %s\n" "$1"; }

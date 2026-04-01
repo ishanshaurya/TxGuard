@@ -2,6 +2,6 @@
 # Used when SPRING_PROFILES_ACTIVE=dev (set in docker-compose.yml)
 # NEVER use these values in production.
 
-bouncer:
+txguard:
   security:
-    api-key: bouncer-dev-key-12345
+    api-key: txguard-dev-key-12345

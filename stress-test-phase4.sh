@@ -31,7 +31,7 @@ is_uuid()   { echo "$1" | grep -qE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 check_db_status() {
     local charge_id="$1"
-    docker exec bouncer-postgres psql -U bouncer -d bouncer -tAc \
+    docker exec txguard-postgres psql -U txguard -d txguard -tAc \
         "SELECT status FROM charges WHERE id='$charge_id';" 2>/dev/null | tr -d '[:space:]'
 }
 
